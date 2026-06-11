@@ -33,8 +33,8 @@ jobs:
             ffmpeg \
             xvfb
         
-      - name: Add NodeJS 22.x repository
-        run: curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash
+      - name: Add NodeJS 24.x repository
+        run: curl -fsSL https://deb.nodesource.com/setup_24.x | sudo bash
         
       - name: Install NodeJS
         run: sudo apt install -y nodejs
@@ -66,21 +66,21 @@ jobs:
             "name": "trial-automation",
             "version": "1.0.0",
             "dependencies": {
-              "@playwright/test": "^1.57.0",
+              "@playwright/test": "^1.60.0",
               "@tensorflow-models/coco-ssd": "^2.2.3",
               "@tensorflow/tfjs": "^4.22.0",
               "@tensorflow/tfjs-node": "^4.22.0",
-              "adm-zip": "^0.5.16",
-              "axios": "^1.13.2",
-              "cheerio": "^1.1.2",
+              "adm-zip": "^0.5.17",
+              "axios": "^1.16.1",
+              "cheerio": "^1.2.0",
               "chokidar": "^5.0.0",
-              "jimp": "^0.22.12",
-              "playwright": "^1.57.0",
-              "playwright-core": "^1.57.0",
-              "puppeteer": "^24.33.0",
+              "jimp": "^1.6.1",
+              "playwright": "^1.60.0",
+              "playwright-core": "^1.60.0",
+              "puppeteer": "^25.1.0",
               "recaptcha-solver": "^0.3.0",
               "sharp": "^0.34.5",
-              "wrangler": "^4.54.0"
+              "wrangler": "^4.96.0"
             }
           }
           EOF
@@ -153,7 +153,24 @@ jobs:
       
       - name: Configure and start Cloudflare WARP
         run: |
-          warp-cli --accept-tos registration new || true
+          registered=false
+          for attempt in 1 2 3; do
+            echo "Cloudflare WARP registration attempt ${attempt}/3"
+            if warp-cli --accept-tos registration new; then
+              registered=true
+              break
+            fi
+
+            echo "Cloudflare WARP registration failed; waiting before retry..."
+            sleep $((attempt * 60))
+          done
+
+          if [ "$registered" != "true" ]; then
+            echo "::warning::Cloudflare WARP registration failed or was rate-limited; continuing without WARP."
+            warp-cli --accept-tos status || true
+            exit 0
+          fi
+
           warp-cli --accept-tos mode warp || true
           warp-cli --accept-tos connect || true
           sleep 5
