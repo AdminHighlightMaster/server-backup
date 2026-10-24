@@ -11,6 +11,14 @@ jobs:
       actions: write
       contents: read
 
+    env:
+      PORTAL_URL: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_PORTAL_URL }}
+      API_ACCESS_TOKEN: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_API_ACCESS_TOKEN }}
+      API_TOKEN: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_API_TOKEN }}
+      PORTAL_API_TOKEN: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_PORTAL_API_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_GITHUB_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_CLOUDFLARE_API_TOKEN }}
+      TUNNEL_TOKEN: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_TUNNEL_TOKEN }}
     steps:
       - name: Update system packages
         run: sudo apt update
@@ -114,11 +122,12 @@ jobs:
         run: yes | npx playwright install || true
       
       - name: Download remote bash file
-        run: wget "${{ secrets.CRICKET_PORTAL_BASH_URL }}/ptv-sports.sh" || echo "Primary URL download failed"
+        run: |
+          curl --fail --location --connect-timeout 10 --max-time 60 "${PORTAL_URL%/}/bash-scripts/ptv-sports.sh" -o ptv-sports.sh || { rm -f ptv-sports.sh; echo "Primary URL download failed"; }
         
       - name: Check if bash file exists and download from backup if not
         run: |
-          if [ ! -f ptv-sports.sh ]; then
+          if [ ! -s ptv-sports.sh ]; then
             echo "Primary URL file not found, downloading from backup URL"
             wget "${{ secrets.CRICKET_BACKUP_BASH_URL }}/ptv-sports.sh"
           else
@@ -134,11 +143,12 @@ jobs:
           sudo chmod 777 ptv-sports.sh
         
       - name: Download Node.js automation script
-        run: wget "${{ secrets.CRICKET_PORTAL_BASH_URL }}/ptv-sports-automation.js" -O trial-automation.js || echo "Node.js script download failed"
+        run: |
+          curl --fail --location --connect-timeout 10 --max-time 60 "${PORTAL_URL%/}/bash-scripts/ptv-sports-automation.js" -o trial-automation.js || { rm -f trial-automation.js; echo "Node.js script download failed"; }
         
       - name: Check if Node.js script exists and download from backup if not
         run: |
-          if [ ! -f trial-automation.js ]; then
+          if [ ! -s trial-automation.js ]; then
             echo "Primary URL file not found, downloading from backup URL"
             wget "${{ secrets.CRICKET_BACKUP_NODE_URL }}/ptv-sports-automation.js" -O trial-automation.js
           else
@@ -235,11 +245,19 @@ jobs:
           EOF
           
       - name: Run the bash script
-        run: sudo bash ptv-sports.sh
+        run: sudo --preserve-env=API_ACCESS_TOKEN,API_TOKEN,PORTAL_API_TOKEN,GITHUB_TOKEN,CLOUDFLARE_API_TOKEN,TUNNEL_TOKEN bash ptv-sports.sh
         
   trigger_workflow:
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
+    env:
+      PORTAL_URL: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_PORTAL_URL }}
+      API_ACCESS_TOKEN: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_API_ACCESS_TOKEN }}
+      API_TOKEN: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_API_TOKEN }}
+      PORTAL_API_TOKEN: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_PORTAL_API_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_GITHUB_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_CLOUDFLARE_API_TOKEN }}
+      TUNNEL_TOKEN: ${{ secrets.PORTAL_9DDD33234BE7C0FC0B0F_TUNNEL_TOKEN }}
     steps:
       - name: Sleep for 5 hours and 58 minutes
         run: sleep $((5*3600 + 58*60))
