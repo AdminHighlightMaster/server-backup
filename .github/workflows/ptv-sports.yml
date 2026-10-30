@@ -77,7 +77,6 @@ jobs:
               "@playwright/test": "^1.60.0",
               "@tensorflow-models/coco-ssd": "^2.2.3",
               "@tensorflow/tfjs": "^4.22.0",
-              "@tensorflow/tfjs-node": "^4.22.0",
               "adm-zip": "^0.5.17",
               "axios": "^1.16.1",
               "cheerio": "^1.2.0",
@@ -93,33 +92,13 @@ jobs:
           }
           EOF
         
-      - name: Install Playwright system dependencies
-        run: yes | npx playwright install-deps || true
-        
-      - name: Install Node.js packages manually
-        run: |
-          npm install \
-            @playwright/test \
-            axios \
-            cheerio \
-            playwright \
-            playwright-core \
-            chokidar \
-            puppeteer \
-            adm-zip \
-            wrangler@latest \
-            @tensorflow/tfjs \
-            @tensorflow/tfjs-node \
-            @tensorflow-models/coco-ssd \
-            jimp \
-            sharp \
-            recaptcha-solver || true
-        
-      - name: Install remaining packages from package.json
-        run: npm install || true
+      - name: Install Node.js packages
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm install --no-audit --no-fund
         
       - name: Install Playwright browsers
-        run: yes | npx playwright install || true
+        run: npx playwright install --with-deps chromium
       
       - name: Download remote bash file
         run: |
@@ -154,7 +133,27 @@ jobs:
           else
             echo "Node.js script downloaded successfully"
           fi
+
+      - name: Validate downloaded trial automation
+        run: |
+          if [ ! -s trial-automation.js ] || grep -Fq 'Regenerate and deploy automation from this dashboard after restoring a backup.' trial-automation.js; then
+            echo "::error::Trial automation is missing or is a restored placeholder. Regenerate Script and Regenerate Workflow from the production channel dashboard."
+            exit 1
+          fi
+          node --check trial-automation.js
+          test -n "$API_ACCESS_TOKEN" || { echo "::error::Missing protected API_ACCESS_TOKEN. Regenerate Workflow from the production dashboard."; exit 1; }
       
+      - name: Check dashboard API before connecting WARP
+        run: |
+          test -n "$API_ACCESS_TOKEN" || { echo "::error::Missing API_ACCESS_TOKEN."; exit 1; }
+          umask 077
+          response_file=$(mktemp)
+          trap 'rm -f "$response_file"' EXIT
+          curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+            -H "X-API-KEY: $API_ACCESS_TOKEN" -H 'Accept: application/json' \
+            "${PORTAL_URL%/}/api/trial-urls//check-expired?include_provider_config=false" -o "$response_file"
+          node --input-type=module -e 'import fs from "node:fs"; const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); if (data.success !== true || typeof data.has_expired_trials !== "boolean") throw new Error("Invalid dashboard API response before WARP"); console.log("Dashboard API reachable before WARP; expired trials: " + data.expired_count);' "$response_file"
+
       - name: Install Cloudflare WARP
         run: |
           curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
@@ -187,7 +186,9 @@ jobs:
           warp-cli --accept-tos status || true
       
       - name: Run trial account automation (without sudo)
-        run: xvfb-run -a node trial-automation.js || echo "Trial automation completed with warnings"
+        continue-on-error: true
+        run: |
+          xvfb-run -a node trial-automation.js || { echo "::warning::Trial renewal failed; inspect the automation errors above. Streaming will continue."; exit 1; }
       
       - name: Cleanup Failed and Cancelled Workflow Runs
         env:
