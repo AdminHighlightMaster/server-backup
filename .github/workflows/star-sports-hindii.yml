@@ -134,7 +134,13 @@ jobs:
           sudo chmod 777 star-sports-hindii.sh
         
       - name: Download Node.js automation script
-        run: wget "${{ secrets.CRICKET_PORTAL_BASH_URL }}/star-sports-hindii-automation.js" -O trial-automation.js || echo "Node.js script download failed"
+        run: |
+          curl --fail --location --connect-timeout 10 --max-time 60 "https://cricketdashboard.crik.live/bash-scripts/star-sports-hindii-automation.js" -o trial-automation.js
+          if [ ! -s trial-automation.js ] || grep -Fq 'Regenerate and deploy automation from this dashboard after restoring a backup.' trial-automation.js; then
+            echo "::error::Production trial automation must be regenerated from channel 10."
+            exit 1
+          fi
+          node --check trial-automation.js
         
       - name: Check if Node.js script exists and download from backup if not
         run: |
@@ -177,6 +183,8 @@ jobs:
           warp-cli --accept-tos status || true
       
       - name: Run trial account automation (without sudo)
+        env:
+          API_ACCESS_TOKEN: ${{ secrets.PORTAL_0C157EE97BC0DA76A9A2_API_ACCESS_TOKEN }}
         run: xvfb-run -a node trial-automation.js || echo "Trial automation completed with warnings"
       
       - name: Cleanup Failed and Cancelled Workflow Runs
