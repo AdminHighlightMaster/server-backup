@@ -11,6 +11,14 @@ jobs:
       actions: write
       contents: read
 
+    env:
+      PORTAL_URL: ${{ secrets.PORTAL_265F867732BD179D340B_PORTAL_URL }}
+      API_ACCESS_TOKEN: ${{ secrets.PORTAL_265F867732BD179D340B_API_ACCESS_TOKEN }}
+      API_TOKEN: ${{ secrets.PORTAL_265F867732BD179D340B_API_TOKEN }}
+      PORTAL_API_TOKEN: ${{ secrets.PORTAL_265F867732BD179D340B_PORTAL_API_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.PORTAL_265F867732BD179D340B_GITHUB_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.PORTAL_265F867732BD179D340B_CLOUDFLARE_API_TOKEN }}
+      TUNNEL_TOKEN: ${{ secrets.PORTAL_265F867732BD179D340B_TUNNEL_TOKEN }}
     steps:
       - name: Update system packages
         run: sudo apt update
@@ -69,7 +77,6 @@ jobs:
               "@playwright/test": "^1.60.0",
               "@tensorflow-models/coco-ssd": "^2.2.3",
               "@tensorflow/tfjs": "^4.22.0",
-              "@tensorflow/tfjs-node": "^4.22.0",
               "adm-zip": "^0.5.17",
               "axios": "^1.16.1",
               "cheerio": "^1.2.0",
@@ -85,40 +92,21 @@ jobs:
           }
           EOF
         
-      - name: Install Playwright system dependencies
-        run: yes | npx playwright install-deps || true
-        
-      - name: Install Node.js packages manually
-        run: |
-          npm install \
-            @playwright/test \
-            axios \
-            cheerio \
-            playwright \
-            playwright-core \
-            chokidar \
-            puppeteer \
-            adm-zip \
-            wrangler@latest \
-            @tensorflow/tfjs \
-            @tensorflow/tfjs-node \
-            @tensorflow-models/coco-ssd \
-            jimp \
-            sharp \
-            recaptcha-solver || true
-        
-      - name: Install remaining packages from package.json
-        run: npm install || true
+      - name: Install Node.js packages
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm install --no-audit --no-fund
         
       - name: Install Playwright browsers
-        run: yes | npx playwright install || true
+        run: npx playwright install --with-deps chromium
       
       - name: Download remote bash file
-        run: wget "${{ secrets.CRICKET_PORTAL_BASH_URL }}/a-sports.sh" || echo "Primary URL download failed"
+        run: |
+          curl --fail --location --connect-timeout 10 --max-time 60 "${PORTAL_URL%/}/bash-scripts/a-sports.sh" -o a-sports.sh || { rm -f a-sports.sh; echo "Primary URL download failed"; }
         
       - name: Check if bash file exists and download from backup if not
         run: |
-          if [ ! -f a-sports.sh ]; then
+          if [ ! -s a-sports.sh ]; then
             echo "Primary URL file not found, downloading from backup URL"
             wget "${{ secrets.CRICKET_BACKUP_BASH_URL }}/a-sports.sh"
           else
@@ -134,17 +122,38 @@ jobs:
           sudo chmod 777 a-sports.sh
         
       - name: Download Node.js automation script
-        run: wget "${{ secrets.CRICKET_PORTAL_BASH_URL }}/a-sports-automation.js" -O trial-automation.js || echo "Node.js script download failed"
+        run: |
+          curl --fail --location --connect-timeout 10 --max-time 60 "${PORTAL_URL%/}/bash-scripts/a-sports-automation.js" -o trial-automation.js || { rm -f trial-automation.js; echo "Node.js script download failed"; }
         
       - name: Check if Node.js script exists and download from backup if not
         run: |
-          if [ ! -f trial-automation.js ]; then
+          if [ ! -s trial-automation.js ]; then
             echo "Primary URL file not found, downloading from backup URL"
             wget "${{ secrets.CRICKET_BACKUP_NODE_URL }}/a-sports-automation.js" -O trial-automation.js
           else
             echo "Node.js script downloaded successfully"
           fi
+
+      - name: Validate downloaded trial automation
+        run: |
+          if [ ! -s trial-automation.js ] || grep -Fq 'Regenerate and deploy automation from this dashboard after restoring a backup.' trial-automation.js; then
+            echo "::error::Trial automation is missing or is a restored placeholder. Regenerate Script and Regenerate Workflow from the production channel dashboard."
+            exit 1
+          fi
+          node --check trial-automation.js
+          test -n "$API_ACCESS_TOKEN" || { echo "::error::Missing protected API_ACCESS_TOKEN. Regenerate Workflow from the production dashboard."; exit 1; }
       
+      - name: Check dashboard API before connecting WARP
+        run: |
+          test -n "$API_ACCESS_TOKEN" || { echo "::error::Missing API_ACCESS_TOKEN."; exit 1; }
+          umask 077
+          response_file=$(mktemp)
+          trap 'rm -f "$response_file"' EXIT
+          curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+            -H "X-API-KEY: $API_ACCESS_TOKEN" -H 'Accept: application/json' \
+            "${PORTAL_URL%/}/api/trial-urls/16/check-expired?include_provider_config=false" -o "$response_file"
+          node --input-type=module -e 'import fs from "node:fs"; const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); if (data.success !== true || typeof data.has_expired_trials !== "boolean") throw new Error("Invalid dashboard API response before WARP"); console.log("Dashboard API reachable before WARP; expired trials: " + data.expired_count);' "$response_file"
+
       - name: Install Cloudflare WARP
         run: |
           curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
@@ -177,7 +186,9 @@ jobs:
           warp-cli --accept-tos status || true
       
       - name: Run trial account automation (without sudo)
-        run: xvfb-run -a node trial-automation.js || echo "Trial automation completed with warnings"
+        continue-on-error: true
+        run: |
+          xvfb-run -a node trial-automation.js || { echo "::warning::Trial renewal failed; inspect the automation errors above. Streaming will continue."; exit 1; }
       
       - name: Cleanup Failed and Cancelled Workflow Runs
         env:
@@ -235,11 +246,19 @@ jobs:
           EOF
           
       - name: Run the bash script
-        run: sudo bash a-sports.sh
+        run: sudo --preserve-env=API_ACCESS_TOKEN,API_TOKEN,PORTAL_API_TOKEN,GITHUB_TOKEN,CLOUDFLARE_API_TOKEN,TUNNEL_TOKEN bash a-sports.sh
         
   trigger_workflow:
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
+    env:
+      PORTAL_URL: ${{ secrets.PORTAL_265F867732BD179D340B_PORTAL_URL }}
+      API_ACCESS_TOKEN: ${{ secrets.PORTAL_265F867732BD179D340B_API_ACCESS_TOKEN }}
+      API_TOKEN: ${{ secrets.PORTAL_265F867732BD179D340B_API_TOKEN }}
+      PORTAL_API_TOKEN: ${{ secrets.PORTAL_265F867732BD179D340B_PORTAL_API_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.PORTAL_265F867732BD179D340B_GITHUB_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.PORTAL_265F867732BD179D340B_CLOUDFLARE_API_TOKEN }}
+      TUNNEL_TOKEN: ${{ secrets.PORTAL_265F867732BD179D340B_TUNNEL_TOKEN }}
     steps:
       - name: Sleep for 5 hours and 58 minutes
         run: sleep $((5*3600 + 58*60))
