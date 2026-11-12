@@ -151,7 +151,7 @@ jobs:
           trap 'rm -f "$response_file"' EXIT
           curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
             -H "X-API-KEY: $API_ACCESS_TOKEN" -H 'Accept: application/json' \
-            "${PORTAL_URL%/}/api/trial-urls//check-expired?include_provider_config=false" -o "$response_file"
+            "${PORTAL_URL%/}/api/trial-urls/9/check-expired?include_provider_config=false" -o "$response_file"
           node --input-type=module -e 'import fs from "node:fs"; const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); if (data.success !== true || typeof data.has_expired_trials !== "boolean") throw new Error("Invalid dashboard API response before WARP"); console.log("Dashboard API reachable before WARP; expired trials: " + data.expired_count);' "$response_file"
 
       - name: Install Cloudflare WARP
